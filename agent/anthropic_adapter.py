@@ -1362,7 +1362,11 @@ def resolve_anthropic_token() -> Optional[str]:
       2. CLAUDE_CODE_OAUTH_TOKEN env var
       3. ANTHROPIC_API_KEY env var (explicit regular API key)
       4. Claude Code credentials (~/.claude.json or ~/.claude/.credentials.json)
-         — with automatic refresh if expired and a refresh token is available
+         — with automatic refresh if expired and a refresh token is available.
+         Skipped if the user has suppressed the claude_code source (e.g. via
+         `hermes auth remove anthropic <claude_code entry>`), which signals
+         they want Hermes pinned to a credential that doesn't follow whatever
+         account Claude Code CLI is currently logged into.
       5. Anthropic credential_pool OAuth entry (~/.hermes/auth.json)
 
     Returns the token string or None.
@@ -1373,7 +1377,12 @@ def resolve_anthropic_token() -> Optional[str]:
     def _read_creds() -> Optional[Dict[str, Any]]:
         nonlocal creds, creds_loaded
         if not creds_loaded:
-            creds = read_claude_code_credentials()
+            try:
+                from hermes_cli.auth import is_source_suppressed
+                suppressed = is_source_suppressed("anthropic", "claude_code")
+            except Exception:
+                suppressed = False
+            creds = None if suppressed else read_claude_code_credentials()
             creds_loaded = True
         return creds
 
