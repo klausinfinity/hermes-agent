@@ -1349,13 +1349,23 @@ def resolve_anthropic_token() -> Optional[str]:
       1. ANTHROPIC_TOKEN env var (OAuth/setup token saved by Hermes)
       2. CLAUDE_CODE_OAUTH_TOKEN env var
       3. Claude Code credentials (~/.claude.json or ~/.claude/.credentials.json)
-         — with automatic refresh if expired and a refresh token is available
+         — with automatic refresh if expired and a refresh token is available.
+         Skipped if the user has suppressed the claude_code source (e.g. via
+         `hermes auth remove anthropic <claude_code entry>`), which signals
+         they want Hermes pinned to a credential that doesn't follow whatever
+         account Claude Code CLI is currently logged into.
       4. Anthropic credential_pool OAuth entry (~/.hermes/auth.json)
       5. ANTHROPIC_API_KEY env var (regular API key, or legacy fallback)
 
     Returns the token string or None.
     """
-    creds = read_claude_code_credentials()
+    try:
+        from hermes_cli.auth import is_source_suppressed
+        claude_code_suppressed = is_source_suppressed("anthropic", "claude_code")
+    except Exception:
+        claude_code_suppressed = False
+
+    creds = None if claude_code_suppressed else read_claude_code_credentials()
 
     # 1. Hermes-managed OAuth/setup token env var
     token = os.getenv("ANTHROPIC_TOKEN", "").strip()
@@ -1374,9 +1384,10 @@ def resolve_anthropic_token() -> Optional[str]:
         return cc_token
 
     # 3. Claude Code credential file
-    resolved_claude_token = _resolve_claude_code_token_from_credentials(creds)
-    if resolved_claude_token:
-        return resolved_claude_token
+    if not claude_code_suppressed:
+        resolved_claude_token = _resolve_claude_code_token_from_credentials(creds)
+        if resolved_claude_token:
+            return resolved_claude_token
 
     # 4. Hermes credential_pool OAuth entry.
     resolved_pool_token = _resolve_anthropic_pool_token()
