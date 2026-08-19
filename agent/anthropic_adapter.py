@@ -1396,18 +1396,28 @@ def resolve_anthropic_token() -> Optional[str]:
       2. CLAUDE_CODE_OAUTH_TOKEN env var
       3. ANTHROPIC_API_KEY env var (explicit regular API key)
       4. Claude Code credentials (~/.claude.json or ~/.claude/.credentials.json)
-         — with automatic refresh if expired and a refresh token is available
+         — with automatic refresh if expired and a refresh token is available.
+         Skipped if the user has suppressed the claude_code source (e.g. via
+         `hermes auth remove anthropic <claude_code entry>`), which signals
+         they want Hermes pinned to a credential that doesn't follow whatever
+         account Claude Code CLI is currently logged into.
       5. Anthropic credential_pool OAuth entry (~/.hermes/auth.json)
 
     Returns the token string or None.
     """
     creds: Optional[Dict[str, Any]] = None
     creds_loaded = False
+    claude_code_suppressed = False
 
     def _read_creds() -> Optional[Dict[str, Any]]:
-        nonlocal creds, creds_loaded
+        nonlocal creds, creds_loaded, claude_code_suppressed
         if not creds_loaded:
-            creds = read_claude_code_credentials()
+            try:
+                from hermes_cli.auth import is_source_suppressed
+                claude_code_suppressed = is_source_suppressed("anthropic", "claude_code")
+            except Exception:
+                claude_code_suppressed = False
+            creds = None if claude_code_suppressed else read_claude_code_credentials()
             creds_loaded = True
         return creds
 
@@ -1433,10 +1443,15 @@ def resolve_anthropic_token() -> Optional[str]:
     if api_key:
         return api_key
 
-    # 4. Claude Code credential file
-    resolved_claude_token = _resolve_claude_code_token_from_credentials(_read_creds())
-    if resolved_claude_token:
-        return resolved_claude_token
+    # 4. Claude Code credential file. Skip entirely when the source is
+    # suppressed — _resolve_claude_code_token_from_credentials(None) treats
+    # a bare None as "fetch fresh" and would otherwise re-read the Keychain
+    # itself, silently undoing the suppression.
+    _step4_creds = _read_creds()
+    if not claude_code_suppressed:
+        resolved_claude_token = _resolve_claude_code_token_from_credentials(_step4_creds)
+        if resolved_claude_token:
+            return resolved_claude_token
 
     # 5. Hermes credential_pool OAuth entry.
     resolved_pool_token = _resolve_anthropic_pool_token()
